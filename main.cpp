@@ -17,7 +17,7 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #define _CRT_SECURE_NO_WARNINGS
-
+#define _FILE_OFFSET_BITS 64
 
 unsigned char WiiUCommenDevKey[16] =
 {
@@ -31,26 +31,53 @@ unsigned char WiiUCommenKey[16] =
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <openssl\aes.h>
-#include <openssl\sha.h>
+#include <openssl/aes.h>
+#include <openssl/sha.h>
 #include <time.h>
 #include <vector>
-#include <direct.h>
 #include <ctype.h>
 
+#ifdef __unix__
+#include <unistd.h>
+#endif
+
+#ifdef _POSIX_VERSION
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <errno.h>
+#include <stdint.h>
+#endif
+
+#ifdef _WIN32
+#include <direct.h>
 #pragma comment(lib,"libeay32.lib")
+#endif
 
-typedef unsigned	__int64 u64;
-typedef signed		__int64 s64;
+#ifdef _POSIX_VERSION
+typedef uint64_t u64;
+typedef  int64_t s64;
 
-typedef unsigned	int u32;
-typedef signed		int s32;
+typedef uint32_t u32;
+typedef  int32_t s32;
 
-typedef unsigned	short u16;
-typedef signed		short s16;
+typedef uint16_t u16;
+typedef  int16_t s16;
 
-typedef unsigned	char u8;
-typedef signed		char s8;
+typedef  uint8_t u8;
+typedef   int8_t s8;
+#else
+typedef unsigned       __int64 u64;
+typedef signed         __int64 s64;
+ 
+typedef unsigned       int u32;
+typedef signed         int s32;
+ 
+typedef unsigned       short u16;
+typedef signed         short s16;
+ 
+typedef unsigned       char u8;
+typedef signed         char s8;
+#endif
 
 AES_KEY key;
 u8 enc_title_key[16];
@@ -164,6 +191,15 @@ struct FEntry
 	unsigned short ContentID;
 };
 
+int fseek64(FILE* stream, uint64_t offset, int whence)
+{
+#ifdef _WIN32
+	return _fseeki64(stream, offset, whence);
+#else
+	return fseeko(stream, offset, whence);
+#endif
+}
+
 #define bs16(s) (u16)( ((s)>>8) | ((s)<<8) )
 #define bs32(s) (u32)( (((s)&0xFF0000)>>8) | (((s)&0xFF00)<<8) | ((s)>>24) | ((s)<<24) )
 
@@ -175,15 +211,34 @@ u64 bs64( u64 i )
 {
 	return ((u64)(bs32(i&0xFFFFFFFF))<<32) | (bs32(i>>32));
 }
-char *ReadFile( const char *Name, u32 *Length )
+FILE *OpenContentFile( u32 id )
 {
-	FILE *in = fopen(Name,"rb");
-	if( in == NULL )
+	// Try upper/lowercase, with and without .app
+	char str[1024];
+	sprintf( str, "%08X.app", id );
+	FILE *in = fopen(str,"rb");
+	if( in != NULL )
 	{
-		//perror("");
-		return NULL;
+		return in;
 	}
-
+	sprintf( str, "%08x.app", id );
+	in = fopen(str,"rb");
+	if( in != NULL )
+	{
+		return in;
+	}
+	sprintf( str, "%08X", id );
+	in = fopen(str,"rb");
+	if( in != NULL )
+	{
+		return in;
+	}
+	sprintf( str, "%08x", id );
+	in = fopen(str,"rb");
+	return in;
+}
+char *ReadFileHandle( FILE *in, u32 *Length )
+{
 	fseek( in, 0, SEEK_END );
 	*Length = ftell(in);
 	
@@ -196,6 +251,16 @@ char *ReadFile( const char *Name, u32 *Length )
 	fclose( in );
 
 	return Data;
+}
+char *ReadFile( const char *Name, u32 *Length )
+{
+	FILE *in = fopen(Name,"rb");
+	return ReadFileHandle(in, Length);
+}
+char *ReadContentFile( u32 id, u32 *Length )
+{
+	FILE *in = OpenContentFile(id);
+	return ReadFileHandle(in, Length);
 }
 void FileDump( const char *Name, void *Data, u32 Length )
 {
@@ -278,7 +343,7 @@ void ExtractFileHash( FILE *in, u64 PartDataOffset, u64 FileOffset, u64 Size, ch
 	if( soffset+Size > WriteSize )
 		WriteSize = WriteSize - soffset;
 
-	_fseeki64( in, PartDataOffset+roffset, SEEK_SET );
+	fseek64( in, PartDataOffset+roffset, SEEK_SET );
 	while(Size > 0)
 	{
 		if( WriteSize > Size )
@@ -360,7 +425,7 @@ void ExtractFile( FILE *in, u64 PartDataOffset, u64 FileOffset, u64 Size, char *
 	if( soffset+Size > WriteSize )
 		WriteSize = WriteSize - soffset;
 
-	_fseeki64( in, PartDataOffset+roffset, SEEK_SET );
+	fseek64( in, PartDataOffset+roffset, SEEK_SET );
 	
 	while(Size > 0)
 	{
@@ -450,19 +515,13 @@ s32 main( s32 argc, char*argv[])
 	char iv[16];
 	memset( iv, 0, sizeof(iv) );
 	
-	sprintf( str, "%08X.app", bs32(tmd->Contents[0].ID) );
-	
 	u32 CNTLen;
-	char *CNT = ReadFile( str, &CNTLen );
+	char *CNT = ReadContentFile( bs32(tmd->Contents[0].ID) , &CNTLen );
 	if( CNT == (char*)NULL )
 	{
-		sprintf( str, "%08X", bs32(tmd->Contents[0].ID) );
-		CNT = ReadFile( str, &CNTLen );
-		if( CNT == (char*)NULL )
-		{
-			printf("Failed to open content:%02X\n", bs32(tmd->Contents[0].ID) );
-			return EXIT_FAILURE;
-		}
+		printf("Failed to open content:%02X\n", bs32(tmd->Contents[0].ID) );
+		perror("");
+		return EXIT_FAILURE;
 	}
 
 	if( bs64(tmd->Contents[0].Size) != (u64)CNTLen )
@@ -530,12 +589,22 @@ s32 main( s32 argc, char*argv[])
 			for( s32 j=0; j<level; ++j )
 			{
 				if(j)
-					Path[strlen(Path)] = '\\';
+					Path[strlen(Path)] = '/';
 				memcpy( Path+strlen(Path), CNT + NameOff + bs24( fe[Entry[j]].NameOffset), strlen(CNT + NameOff + bs24( fe[Entry[j]].NameOffset) ) );
+
+#ifdef _WIN32
 				_mkdir(Path);
+#else
+				if (mkdir(Path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0 && errno != EEXIST)
+				{
+					printf("Error creating directory \"%s\"\n", Path);
+					perror("");
+					return EXIT_FAILURE;
+				}
+#endif				
 			}
 			if(level)
-				Path[strlen(Path)] = '\\';
+				Path[strlen(Path)] = '/';
 			memcpy( Path+strlen(Path), CNT + NameOff + bs24( fe[i].NameOffset ), strlen(CNT + NameOff + bs24( fe[i].NameOffset )) );
 
 			u32 CNTSize = bs32(fe[i].FileLength);
@@ -550,21 +619,14 @@ s32 main( s32 argc, char*argv[])
 
 			u32 ContFileID = bs32(tmd->Contents[bs16(fe[i].ContentID)].ID);
 			
-			sprintf( str, "%08X.app", ContFileID );
-
 			if(!(fe[i].Type & 0x80))
 			{
-				FILE *cnt = fopen( str, "rb" );
+				FILE *cnt = OpenContentFile( ContFileID );
 				if( cnt == NULL )
 				{
-					sprintf( str, "%08X", ContFileID );
-					cnt = fopen( str, "rb" );
-					if( cnt == NULL )
-					{
-						printf("Could not open:\"%s\"\n", str );			
-						perror("");
-						return EXIT_FAILURE;
-					}
+					printf("Failed to open content:%02X\n", ContFileID );
+					perror("");
+					return EXIT_FAILURE;
 				}
 				if( (bs16(fe[i].Flags) & 0x440) )
 				{
