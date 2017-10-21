@@ -36,6 +36,7 @@ unsigned char WiiUCommenKey[16] =
 #include <time.h>
 #include <vector>
 #include <ctype.h>
+#include <cstdint>
 
 #ifdef __unix__
 #include <unistd.h>
@@ -454,7 +455,7 @@ s32 main( s32 argc, char*argv[])
 	char str[1024];
 	
 	printf("CDecrypt v 2.0b by crediar\n");
-	printf("Built: %s %s\n", __TIME__, __DATE__ );
+	printf("Built: %s %s " _BUILDER_ "\n", __TIME__, __DATE__ );
 
 	if( argc != 3 )
 	{

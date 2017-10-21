@@ -1,0 +1,44 @@
+language: cpp
+matrix:
+  include:
+  - env:
+    - PLATFORM='linux_x86_64'
+    os: linux
+    dist: trusty
+    sudo: required
+    compiler: gcc
+  - env:
+    - PLATFORM='windows_x86_64'
+    - CROSS_COMPILE=/usr/lib/mxe/usr/bin/x86_64-w64-mingw32.static-
+    - FILE_EXTENTION=.exe
+    os: linux
+    dist: trusty
+    sudo: required
+    compiler: gcc
+before_install:
+- sudo sh -c 'echo "deb http://pkg.mxe.cc/repos/apt/debian wheezy main" > /etc/apt/sources.list.d/mxeapt.list'
+- sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys D43A795B73B16ABE9643FE1AFD8FFF16DB45C6AB
+- sudo apt-get -qq update
+install:
+- sudo apt-get install gcc libssl-dev
+- if [[ "$PLATFORM" == "windows_x86_64" ]]; then sudo apt-get install --no-install-recommends -y mxe-x86-64-w64-mingw32.static-gcc
+  mxe-x86-64-w64-mingw32.static-openssl; fi
+script:
+- export BUILDER="$(whoami)@$(hostname) (travis-ci)"
+- export CROSS_COMPILE
+- make
+- if [[ "$PLATFORM" == "windows_x86_64" ]]; then mv cdecrypt cdecrypt$FILE_EXTENTION;
+  fi
+before_deploy:
+- zip cdecrypt-$PLATFORM.zip cdecrypt$FILE_EXTENTION
+- md5sum cdecrypt-$PLATFORM.zip
+- sha1sum cdecrypt-$PLATFORM.zip
+deploy:
+  provider: releases
+  api_key:
+    secure: f7V1tbc/rPDSTXjyRYvMdGkMwj6LZPWu0xGWQINdF8LR26tEXJDfWXx3gHuLYtAJ7+FR0nNOq8AYWrNUkUycyjz1bCL+gVYNNOsxtFB/7XhVgr/EsZjRDhWRF1JrKNAbm+xkGVzZDRcblKxBdu/l5+6rHuj+AxkGRh8lY+865fqBXlnS3BhZpBveExaRb4+wmkY+h/OAqIntQ0mGV0m6J2zPoGmIBymF9vY3Fl9y0DhDyOjemYL0oWaJWeXDhacVFGfhpCCPzLZU4/nN3ydNZ3tb4M/heh4rXUCoZsRXha8RCL2aCnLXva+w83EwjITV4bCMzZCq0Fktb1F70qUqRSCToTwt4MxHIgvxO0VXfVDz0c7mjH9TSYfZq90ZHW51i2bEtfgEX7/TfvZcC5W4NgpHSHPpP0Pdy7H2E9OV61eF1Ya82vhebtv7VJmI07jybfytRBjJ+OMh3NbgjchJucezojZE77UmNNVWEhddyurIdX+G0luBoFhqQ1bH2Ky9zOW/Y7Vob6ZIZY8Xg379wVwutkqSnJS4z60M+aC26AMfBO13lgpYdWB+RczTF/ELFs7v9WlHf/ZskCoEJWy25LibkmQM7GIqa8WkgLuc1oUIs1PR7f4Ec8JQpSjuRsGe9Uu6/xrZjjREWkLfKS2jwQqSJCl6Z2gknrVK+J1Sp6g=
+  file: cdecrypt-$PLATFORM.zip
+  skip_cleanup: true
+  on:
+    repo: beefoch/cdecrypt
+    tags: true
